@@ -10,4 +10,9 @@ public class Resource {
         ResourceBundle stringResource = ResourceBundle.getBundle("strings");
         return stringResource.getString(key) != null ? stringResource.getString(key) : "";
     }
+
+    public static String getStringResourceWithParam(String key, String stringParam) {
+        String resString = getStringResource(key);
+        return resString.replace("PARAM", stringParam);
+    }
 }

@@ -3,6 +3,7 @@ package view;
 import controller.MailboxController;
 import utils.Resource;
 
+import javax.mail.Store;
 import javax.swing.JFrame;
 import javax.swing.JTextField;
 import javax.swing.JButton;
@@ -18,6 +19,12 @@ public class LoginGUI extends GUI implements MailboxController.MailboxExceptionH
     private JPasswordField mPasswordInputPasswordField;
     private JButton mCancelButton;
     private JPanel mRootPanel;
+    private LoginListener mLoginListener;
+    private Store mSessionStore;
+
+    public interface LoginListener {
+        void onLogin(Store store);
+    }
 
     private LoginGUI(JFrame frame) {
         mCurrentWindow = frame;
@@ -49,8 +56,8 @@ public class LoginGUI extends GUI implements MailboxController.MailboxExceptionH
             return;
         }
 
-        if (MailboxController.newInstance(this).login(username, password) != null) {
-            InboxGUI.newInstance(mCurrentWindow);
+        if ((mSessionStore = MailboxController.newInstance(this).login(username, password)) != null) {
+            InboxGUI.newInstance(mCurrentWindow, mSessionStore, username);
         }
     }
 
