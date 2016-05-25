@@ -56,7 +56,8 @@ public class LoginGUI extends GUI implements MailboxController.MailboxExceptionH
             return;
         }
 
-        if ((mSessionStore = MailboxController.newInstance(this).login(username, password)) != null) {
+        MailboxController.getInstance().setExceptionListener(this);
+        if ((mSessionStore = MailboxController.getInstance().login(username, password)) != null) {
             InboxGUI.newInstance(mCurrentWindow, mSessionStore, username);
         }
     }
@@ -64,9 +65,9 @@ public class LoginGUI extends GUI implements MailboxController.MailboxExceptionH
     @Override
     public void onException(MailboxController.ExceptionType e) {
         if (e.equals(MailboxController.ExceptionType.SERVER_NOT_FOUND)) {
-            showDialog(Resource.getStringResource("noProviderTitle"), Resource.getStringResource("noProviderMessage"));
+            showDialog(Resource.getStringResource("errorNoProviderTitle"), Resource.getStringResource("errorNoProviderMessage"));
         } else if (e.equals(MailboxController.ExceptionType.LOGIN_FAILURE)) {
-            showDialog(Resource.getStringResource("loginFailureTitle"), Resource.getStringResource("loginFailureMessage"));
+            showDialog(Resource.getStringResource("errorLoginTitle"), Resource.getStringResource("errorLoginMessage"));
         }
     }
 }
