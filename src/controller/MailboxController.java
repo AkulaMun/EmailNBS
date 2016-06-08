@@ -1,14 +1,27 @@
 package controller;
 
+import model.EmailCache;
+import model.TaggedMessage;
+
 import javax.mail.*;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.*;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Properties;
 
 /**
  * Created by Arcenal on 2/4/2016.
  */
 public class MailboxController {
-    //TODO: method calls to this class is seriously slow.....Implementing multithreading??
+    //TODO: API method call in this class is seriously slow.....Implementing multithreading??
     public interface MailboxExceptionHandlerInterface {
         void onException(ExceptionType e);
     }
@@ -16,14 +29,18 @@ public class MailboxController {
     private final static String MAIL_PROTOCOL = "imaps";
     private final static String MAIL_URL = "imap.gmail.com";
     private final static int MAIL_PORT = 993;
+    private final static String FILE_EXTENSION = ".emc";
+    private final static String FILE_DIRECTORY = "Cache/";
 
-    public enum ExceptionType {LOGIN_FAILURE, SERVER_NOT_FOUND, FOLDER_ACCESS_FAILURE, NO_MESSAGES, CORRUPT_MESSAGE_TITLE, UNREADABLE_MESSAGE_CONTENT}
+    public enum ExceptionType {LOGIN_FAILURE, SERVER_NOT_FOUND, FOLDER_ACCESS_FAILURE, UNREADABLE_MESSAGE_CONTENT, FILE_IO_ERROR}
 
     private static MailboxController sSelf;
 
     private MailboxExceptionHandlerInterface mExceptionListener;
-    private List<Message> mMessageList = new ArrayList<>();
-    private Map<String, String> mFolderNameMap = new HashMap<>();
+    private EmailCache mEmailCache;
+
+    private String mUsername;
+    private boolean mIsCachedEmail = false;
 
     private MailboxController() {
     }
@@ -39,6 +56,7 @@ public class MailboxController {
         mExceptionListener = exceptionListener;
     }
 
+    //API call Method
     public Store login(String username, String password) {
         Properties props = System.getProperties();
         Session session;
@@ -55,101 +73,125 @@ public class MailboxController {
             if (mExceptionListener != null) {
                 mExceptionListener.onException(ExceptionType.LOGIN_FAILURE);
             }
+            return null;
         }
-        getStoreFolders(store);
+        mUsername = username;
+        Object readObject = readCacheFromFile("");
+        if (readObject != null && readObject.getClass() == EmailCache.class) {
+            EmailCache emailCache = (EmailCache) readObject;
+            if (emailCache.matchUsername(username)) {
+                mEmailCache = emailCache;
+                mIsCachedEmail = true;
+            }
+        } else {
+            mEmailCache = new EmailCache(mUsername);
+            updateEmailFromAPI(store);
+        }
         return store;
     }
 
-    private void getStoreFolders(Store store) {
+    //API call Method
+    public void updateEmailFromAPI(Store store) {
         if (store == null) return;
-
+        mIsCachedEmail = false;
+        mEmailCache.clearFolderMessages();
         try {
             Folder[] folders = store.getDefaultFolder().list("*");
+            Map<String, String> folderDisplayNameToRealNameMap = new HashMap<>();
             for (Folder folder : folders) {
                 if((folder.getType() & Folder.HOLDS_MESSAGES) != 0){
+                    //Handling Email Folders
                     String folderDisplayName = folder.getFullName();
                     folderDisplayName = folderDisplayName.replaceFirst("\\[Gmail\\]/", "");
-                    mFolderNameMap.put(folderDisplayName, folder.getFullName());
+                    folderDisplayNameToRealNameMap.put(folderDisplayName, folder.getFullName());
+
+                    //Handling Emails Within Folders
+                    folder.open(Folder.READ_ONLY);
+                    Message[] messageArray = folder.getMessages();
+                    List<TaggedMessage> messageList = new ArrayList<>();
+                    for(Message message : messageArray) {
+                        TaggedMessage taggedMessage = new TaggedMessage(message);
+                        messageList.add(taggedMessage);
+                    }
+                    mEmailCache.addFolderMessages(folder.getFullName(), messageList);
                 }
             }
+            mEmailCache.setDisplayNameToFolderNameMap(folderDisplayNameToRealNameMap);
         } catch (MessagingException e) {
             if (mExceptionListener != null) {
                 mExceptionListener.onException(ExceptionType.FOLDER_ACCESS_FAILURE);
             }
+        } catch (IOException e) {
+            if (mExceptionListener != null) {
+                mExceptionListener.onException(ExceptionType.UNREADABLE_MESSAGE_CONTENT);
+            }
         }
     }
 
-    public Set<String> getFolderDisplayTitles() {
-        if (!(mFolderNameMap.size() > 1)) {
-            return null;
-        } else {
-            return mFolderNameMap.keySet();
-        }
+    public List<String> getFolderDisplayTitles() {
+        return (mEmailCache.getAllFolderDisplayName().size() > 0) ? mEmailCache.getAllFolderDisplayName() : null;
     }
 
     public String getFolderName(String displayName) {
-        if (!(mFolderNameMap.size() > 1)) {
-            return null;
-        } else {
-            return mFolderNameMap.get(displayName);
-        }
+        return mEmailCache.getFolderName(displayName);
     }
 
-    public void updateMessageList(Store store, String folderName) {
-        mMessageList.clear();
-        Folder folder;
-        try {
-            folder = store.getFolder(folderName);
-            folder.open(Folder.READ_ONLY);
-            Message[] messageArray = folder.getMessages();
-            for(Message message : messageArray) {
-                mMessageList.add(message);
-            }
-        } catch (MessagingException e) {
-            if (mExceptionListener != null) {
-                mExceptionListener.onException(ExceptionType.NO_MESSAGES);
-            }
-        }
-    }
-
-    public List<String> getMessageTitles() {
+    public List<String> getMessageTitles(String folderDisplayName) {
         List<String> messageTitleList = new ArrayList<>();
-        try {
-            for (Message message : mMessageList) {
-                messageTitleList.add(message.getSubject());
-            }
-        } catch (MessagingException e) {
-            if (mExceptionListener != null) {
-                mExceptionListener.onException(ExceptionType.CORRUPT_MESSAGE_TITLE);
-            }
+        for (TaggedMessage message : mEmailCache.getMessagesViaFolderDisplayName(folderDisplayName)) {
+            messageTitleList.add(message.getSubject());
         }
         return messageTitleList;
     }
 
-    public String getMessageContent(String messageSubject) {
-        StringBuilder messageContentStringBuilder = new StringBuilder();
-        try {
-            for (Message message : mMessageList) {
-                if (message.getSubject().equals(messageSubject)) {
-                    if (message.getContent() instanceof String) {
-                        messageContentStringBuilder.append(message.getContent());
-                    } else {
-                        Multipart messagePart = (Multipart) message.getContent();
-                        for (int i = 0; i < messagePart.getCount(); i++) {
-                            BodyPart messageBodyPart = messagePart.getBodyPart(i);
-                            if (messageBodyPart.isMimeType("text/*")) {
-                                messageContentStringBuilder.append(messageBodyPart.getContent());
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            if (mExceptionListener != null) {
-                mExceptionListener.onException(ExceptionType.UNREADABLE_MESSAGE_CONTENT);
-                System.out.print(e.toString());
+    public boolean isCached() {
+        return mIsCachedEmail;
+    }
+
+    //First element is the message, the 2nd element is a string tag.
+    public String[] getMessageTagAndContent(String messageSubject, String folderDisplayName) {
+        String[] resultArray = new String[2];
+        for (TaggedMessage message : mEmailCache.getMessagesViaFolderDisplayName(folderDisplayName)) {
+            if (message.getSubject().contentEquals(messageSubject)) {
+                resultArray[0] = message.getContent();
+                resultArray[1] = message.getTag();
+                return resultArray;
             }
         }
-        return messageContentStringBuilder.toString();
+        return null;
+    }
+
+    public void saveCache() {
+        writeCacheToFile(mEmailCache, "");
+    }
+
+    private void writeCacheToFile(Object savedObject, String directory) {
+        String fileName = mUsername + FILE_EXTENSION;
+        try {
+            ObjectOutputStream writer = new ObjectOutputStream(new BufferedOutputStream(new FileOutputStream(directory + fileName)));
+            writer.writeObject(savedObject);
+            writer.close();
+        } catch(Exception e) {
+            System.out.print(e.toString());
+            if(mExceptionListener != null) {
+                mExceptionListener.onException(ExceptionType.FILE_IO_ERROR);
+            }
+        }
+    }
+
+    private Object readCacheFromFile(String directory) {
+        String fileName = mUsername + FILE_EXTENSION;
+        try {
+            ObjectInputStream reader = new ObjectInputStream(new BufferedInputStream(new FileInputStream(directory + fileName)));
+            Object readObject = reader.readObject();
+            reader.close();
+            return readObject;
+        } catch(Exception e) {
+            System.out.print(directory + fileName);
+            if(mExceptionListener != null) {
+                mExceptionListener.onException(ExceptionType.FILE_IO_ERROR);
+            }
+            return null;
+        }
     }
 }

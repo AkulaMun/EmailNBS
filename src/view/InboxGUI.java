@@ -3,16 +3,12 @@ package view;
 import controller.MailboxController;
 import utils.Resource;
 
-import javax.mail.Message;
-import javax.mail.MessagingException;
 import javax.mail.Store;
 import javax.swing.*;
 
 import java.awt.Dimension;
 import java.awt.event.ItemEvent;
 import java.util.List;
-import java.util.ArrayList;
-import java.util.Set;
 
 /**
  * Created by Arcenal on 2/4/2016.
@@ -25,13 +21,16 @@ public class InboxGUI extends GUI implements MailboxController.MailboxExceptionH
     private JTabbedPane mRootTabbedPane;
     private JPanel mRootPanel;
     private JPanel mMailboxPanel;
+    private JPanel mTagSettingPanel;
     private JComboBox mMessageTitleComboBox;
     private JTextArea mMessageContentTextArea;
-    private JPanel mSettingPanel;
     private JTextArea mTagTextArea;
     private JButton mLogoutButton;
     private JLabel mUsernameLabel;
     private JComboBox mMailboxComboBox;
+    private JLabel mCacheStatusLabel;
+    private JButton mTagAllMailsWithFolderName;
+    private JButton mRefreshCacheButton;
     private JFrame mCurrentWindow;
 
     private InboxGUI(JFrame frame, Store store, String user) {
@@ -46,33 +45,32 @@ public class InboxGUI extends GUI implements MailboxController.MailboxExceptionH
         return new InboxGUI(frame, sessionStore, userName);
     }
 
-    //USED FOR DEBUG, BE SURE TO DELETE IT
-    public static InboxGUI newInstance(JFrame frame) {
-        frame.setPreferredSize(new Dimension(800, 1000));
-        return new InboxGUI(frame, null, "Tovarich the End of The World");
-    }
-
     protected void initialize() {
         mCurrentWindow.setContentPane(mRootPanel);
         mCurrentWindow.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         mCurrentWindow.pack();
         mCurrentWindow.setVisible(true);
 
-        mUsernameLabel.setText(Resource.getStringResourceWithParam("username", mUserName));
-        mLogoutButton.addActionListener(e -> LoginGUI.newInstance(mCurrentWindow));
+        if (mSessionStore == null) return;
 
         mMailboxController = MailboxController.getInstance();
         mMailboxController.setExceptionListener(this);
 
-        mMailboxComboBox.removeAllItems();
+        mUsernameLabel.setText(Resource.getStringResourceWithParam("username", mUserName));
+        mLogoutButton.addActionListener(e -> {
+            mMailboxController.saveCache();
+            LoginGUI.newInstance(mCurrentWindow);
+        });
 
-        Set<String> mailFolders = mMailboxController.getFolderDisplayTitles();
+        mRefreshCacheButton.addActionListener(e -> mMailboxController.updateEmailFromAPI(mSessionStore));
+
+        mCacheStatusLabel.setText(Resource.getStringResource(mMailboxController.isCached() ? "cachedMail" : "notCachedMail"));
+
+        mMailboxComboBox.removeAllItems();
+        List<String> mailFolders = mMailboxController.getFolderDisplayTitles();
         for(String mailFolder : mailFolders) {
             mMailboxComboBox.addItem(mailFolder);
         }
-
-        if (mSessionStore == null) return;
-
         displayMessageTitles(mMailboxComboBox.getItemAt(0).toString());
 
         mMailboxComboBox.addItemListener(e -> {
@@ -89,17 +87,18 @@ public class InboxGUI extends GUI implements MailboxController.MailboxExceptionH
     }
 
     private void displayMessageTitles(String folderDisplayName) {
-        mMailboxController.updateMessageList(mSessionStore, mMailboxController.getFolderName(folderDisplayName));
         mMessageContentTextArea.setText("");
         mMessageTitleComboBox.removeAllItems();
-        List<String> mMessageTitleList = mMailboxController.getMessageTitles();
+        List<String> mMessageTitleList = mMailboxController.getMessageTitles(folderDisplayName);
         for (String messageTitle : mMessageTitleList) {
             mMessageTitleComboBox.addItem(messageTitle);
         }
     }
 
     private void displayMessageContent(String messageSubject) {
-        mMessageContentTextArea.setText( mMailboxController.getMessageContent(messageSubject));
+        String[] tagAndMessage = mMailboxController.getMessageTagAndContent(messageSubject, mMailboxComboBox.getSelectedItem().toString());
+        mMessageContentTextArea.setText(tagAndMessage[0]);
+        mTagTextArea.setText(tagAndMessage[1]);
     }
 
     @Override
@@ -114,11 +113,11 @@ public class InboxGUI extends GUI implements MailboxController.MailboxExceptionH
             case FOLDER_ACCESS_FAILURE:
                 showDialog(Resource.getStringResource("errorFolderAccessTitle"), Resource.getStringResource("errorFolderAccessMessage"));
                 break;
-            case CORRUPT_MESSAGE_TITLE:
-                showDialog(Resource.getStringResource("errorMessageSubjectTitle"), Resource.getStringResource("errorMessageSubjectMessage"));
-                break;
             case UNREADABLE_MESSAGE_CONTENT:
                 showDialog(Resource.getStringResource("errorMessageContentTitle"), Resource.getStringResource("errorMessageContentMessage"));
+                break;
+            case FILE_IO_ERROR:
+                showDialog(Resource.getStringResource("errorMessageFileIOTitle"), Resource.getStringResource("errorMessageFileIOMessage"));
                 break;
         }
     }

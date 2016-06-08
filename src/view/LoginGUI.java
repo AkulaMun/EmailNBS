@@ -9,6 +9,7 @@ import javax.swing.JTextField;
 import javax.swing.JButton;
 import javax.swing.JPasswordField;
 import javax.swing.JPanel;
+import java.awt.*;
 
 /**
  * Created by Arcenal on 2/4/2016.
@@ -19,12 +20,7 @@ public class LoginGUI extends GUI implements MailboxController.MailboxExceptionH
     private JPasswordField mPasswordInputPasswordField;
     private JButton mCancelButton;
     private JPanel mRootPanel;
-    private LoginListener mLoginListener;
     private Store mSessionStore;
-
-    public interface LoginListener {
-        void onLogin(Store store);
-    }
 
     private LoginGUI(JFrame frame) {
         mCurrentWindow = frame;
@@ -32,6 +28,7 @@ public class LoginGUI extends GUI implements MailboxController.MailboxExceptionH
     }
 
     public static LoginGUI newInstance(JFrame frame) {
+        frame.setPreferredSize(new Dimension(800, 600));
         return new LoginGUI(frame);
     }
 
